@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redatt"
+version = "0.1.0"
+description = "Regularised (RED) spectral-log-difference attenuation imaging from pulse-echo IQ"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.22", "scipy>=1.8"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = ["redatt", "redatt._vendor", "redatt._vendor.qt_detgc"]
+
+[tool.setuptools.package-data]
+redatt = ["data/*.npz"]
