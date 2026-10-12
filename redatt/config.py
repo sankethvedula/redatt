@@ -34,6 +34,12 @@ class Config:
     valid_frac: float = 0.9             # a block is used when this fraction of its pixels holds echo
     win_mm: float = 3.0                 # window (mm x mm) of the pixel-validity power
 
+    # ---- edge-aware estimation (redatt.gpu only; needs a guide image per frame, e.g. a compounded B-mode in dB)
+    edge_sigma_db: float | None = None  # spectra: weight each pixel of a block by exp(-(g - g_centre)^2 / 2 s^2)
+    edge_min_frac: float = 0.3          # ... and drop blocks whose proximal or distal window keeps less weight than this
+    med_sigma_db: float | None = None   # RED: weighted median, neighbour weight exp(-(g_j - g_i)^2 / 2 s^2)
+    guide_detrend: bool = True          # subtract the guide's per-sample median over beams (its depth trend) first
+
     # ---- RED solver
     mu: float = 100.0                   # regularisation weight
     k_med: int = 7                      # median denoiser size (blocks)
@@ -41,6 +47,9 @@ class Config:
     lam: float | None = None            # soft threshold on the backscatter channel; None: 1 / mu
     tol: float = 1e-5                   # relative-change stopping tolerance
     max_iter: int = 3000
+    accel: str = "none"                 # 'none': plain RED-PG; 'anderson': Anderson-accelerated (same fixed point,
+                                        # reached far more closely: use with tol ~1e-8)
+    mem: int = 10                       # Anderson memory
 
     # ---- reference
     ref_min_blocks: int = 200           # a row / band of the self reference needs at least this many blocks

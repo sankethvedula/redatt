@@ -47,6 +47,13 @@ For each frame (all beams of one view and level), from the stored complex IQ:
    - **Problem:** `argmin ½‖Ax − y‖² + (μ/2) xᵀ(x − D(x))` with `D = (7×7 median on β, soft-threshold 1/μ on c)`,
      `μ = 100`.
    - **Algorithm:** RED proximal gradient. Each iteration is an exact 2×2 solve per block.
+   - **Acceleration (optional, `Config(accel="anderson", tol=1e-8)`):** Anderson acceleration of the same fixed-point
+     map, with a monotone safeguard.
+     - It reaches the same fixed point. Plain RED-PG contracts slowly: at `tol=1e-5` (~900 iterations) it stops
+       typically 4e-3 and up to 1.4e-2 dB/mm/MHz from the fixed point, and fully converging takes up to ~10 000
+       iterations.
+     - Anderson gets within ~4e-5 in a median of ~500 iterations (at most ~1400) on QT data.
+     - The default stays `accel="none"` so results reproduce the research pipeline.
 6. **Compounding** (`compound.py`)
    - **Weight:** each block's reliability, `block_weight`, is the inverse predicted variance of the slope from its
      window SNRs.
@@ -84,6 +91,56 @@ out = est.estimate(probe.frame(5, 16), ref)
 `examples/qt_exam.py` does this end to end and saves a figure: about 30 s for a 440-frame reference plus one view, on
 one core. `examples/generic.py` shows the same with your own arrays, on synthetic IQ with known attenuation.
 
+## GPU
+
+`redatt.gpu` (needs PyTorch, `pip install -e .[gpu]`) runs the same computations batched over frames on a GPU:
+- the front end;
+- the measurement;
+- the self reference;
+- the RED solver, plain or Anderson. Each frame stops at its own iteration, and finished frames are dropped from the
+  batch.
+
+Results match the CPU path (float64): measurements to ~1e-12, the β map to ~1e-14 (plain) or within the tolerance
+(Anderson).
+
+```python
+import redatt.gpu as rg
+est = rg.GPUEstimator(cfg, noise=noise, limited=limited, device="cuda")
+fb = rg.FrameBatch(env, centres_mhz, depth_mm, beam_spacing_mm)   # env [N, nband, B, S]; or from rg.band_envelopes
+ref = est.self_reference([fb1, fb2, ...])
+outs = est.estimate(fb, ref)                                       # list of Estimate, one per frame
+```
+
+With QT data, `probe.frame_batch(view)` builds all levels of a view on the GPU and `probe.gpu_estimator()` gives the
+estimator. `examples/qt_exam_gpu.py` runs a whole exam: the self reference, then all 60 views × 43 levels.
+
+On one H100, QT007 (2580 frames) takes about 1 minute:
+
+| step | time |
+|---|---|
+| self reference | 2.5 s |
+| front end | 3 s |
+| measure + RED, plain | 55 s (21 ms/frame) |
+| measure + RED, Anderson | 67 s (26 ms/frame) |
+
+On the CPU this is ~1 s per frame (~45 min on one core).
+
+**Edge-aware estimation (experimental, GPU only).** Pass a guide image per frame (e.g. a compounded B-mode in dB,
+mapped back into the frame) as `est.estimate(fb, ref, guide=guide)`. Two options use it:
+- `Config.med_sigma_db`: RED's median becomes a median weighted by how similar each neighbouring block's guide value is
+  to the block's own, so smoothing does not cross guide edges.
+- `Config.edge_sigma_db`: each block's window spectra weight pixels by their guide similarity to the block centre.
+  - A block's data weight is the fraction of weight its windows keep.
+  - Its effective window separation comes from the weight centroids.
+  - The guide's depth trend is removed first (`guide_detrend`).
+
+On a synthetic phantom where echo edges coincide with attenuation edges, the guided median recovers a 16 mm
+inclusion's contrast (0.043 of 0.050 vs 0.016) with a 4 mm instead of a 22 mm edge, at the same noise. Edge-aware
+spectra add contrast but also create false contrast at echo-only edges.
+
+The masked 7×7 median dominates each iteration. On the GPU it runs on the domain blocks only, as a selection rather
+than a sort: missing window slots are padded with ±inf so that the plain median is the masked one.
+
 ## Checks
 
 ```
@@ -95,6 +152,9 @@ PYTHONPATH=. pytest -q tests
   - an inclusion's contrast is recovered;
   - a range-dependent system term cancels with the self reference;
   - the stepped phase reduces to a constant carrier.
+- **`test_gpu.py`:**
+  - Anderson-accelerated RED reaches the fixed point of plain RED;
+  - the GPU front end, measurement, reference and RED map match the CPU. Skipped without CUDA.
 - **`test_against_pdg.py`:** reproduces the research pipeline this was extracted from (`phantom_detgc/pdg` in the
   qti-specular repository) on a real QT frame. The band envelopes, band masks, measurements, self reference and RED map
   all match, the map to 1e-5 dB/mm/MHz. It is skipped where that repository or the data are absent.

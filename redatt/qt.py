@@ -120,6 +120,24 @@ class QTProbe:
     def frame(self, view: int, level: int) -> Frame:
         return self.frame_from_iq(self.read(view)[level])
 
+    def batch_from_iq(self, iq: np.ndarray, device="cuda"):
+        """iq [levels, beams, samples] -> redatt.gpu.FrameBatch, front end on the GPU (complex128, as on the CPU)."""
+        from . import gpu
+        import torch
+        z = gpu.rereference(gpu.undo_gain(torch.as_tensor(np.asarray(iq, np.complex128), device=device), self.tgc_db),
+                            self.phase, self.t, self.f_ref)
+        env = gpu.band_envelopes(z, 5e6, self.f_ref, self.cfg.centres(), self.cfg.df, self.cfg.nfft, self.filter_db)
+        return gpu.FrameBatch(env, self.cfg.centres(), self.depth_mm, self.beam_spacing_mm)
+
+    def frame_batch(self, view: int, levels=None, device="cuda"):
+        """Every level (or `levels`) of one view as a GPU FrameBatch."""
+        iq = self.read(view)
+        return self.batch_from_iq(iq if levels is None else iq[levels], device)
+
+    def gpu_estimator(self, device="cuda", **kw):
+        from .gpu import GPUEstimator
+        return GPUEstimator(self.cfg, noise=self.noise(), limited=self.limited, device=device, **kw)
+
     def noise(self) -> np.ndarray | None:
         """The QT system receive-noise curve shipped with the package (far probe, stepped demodulation, default
         bands), or None if it does not match this probe's samples or bands."""

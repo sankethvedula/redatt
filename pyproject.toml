@@ -11,6 +11,7 @@ dependencies = ["numpy>=1.22", "scipy>=1.8"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+gpu = ["torch>=2.0"]
 
 [tool.setuptools]
 packages = ["redatt", "redatt._vendor", "redatt._vendor.qt_detgc"]
